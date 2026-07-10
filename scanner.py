@@ -9,6 +9,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 TARGET_TICKER = os.environ.get("TARGET_TICKER", "brodie")     # case-insensitive
 TARGET_CHAIN = os.environ.get("TARGET_CHAIN", "robinhood")    # dexscreener chain id
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+MAX_AGE_MINUTES = int(os.environ.get("MAX_AGE_MINUTES", "30"))  # only alert if pair is younger than this
 SEEN_FILE = "seen_pairs.json"
 # =======================================================================================
 
@@ -48,7 +49,7 @@ def send_telegram(message):
         print(f"[Telegram exception] {e}")
 
 
-def check_dexscreener(seen):
+def check_dexscreener(seen, baseline_mode=False):
     try:
         r = requests.get(DEX_SEARCH_URL, params={"q": TARGET_TICKER}, timeout=15)
         r.raise_for_status()
@@ -59,6 +60,7 @@ def check_dexscreener(seen):
 
     pairs = data.get("pairs") or []
     new_found = False
+    now_ms = time.time() * 1000
 
     for pair in pairs:
         chain_id = (pair.get("chainId") or "").lower()
@@ -74,6 +76,18 @@ def check_dexscreener(seen):
 
         seen.add(pair_address)
         new_found = True
+
+        # On the very first run, just record what already exists — don't alert on it.
+        if baseline_mode:
+            continue
+
+        # Safety net: skip anything that isn't actually fresh, even if it's new to us.
+        created_at_ms = pair.get("pairCreatedAt")
+        if created_at_ms:
+            age_minutes = (now_ms - created_at_ms) / 60000
+            if age_minutes > MAX_AGE_MINUTES:
+                print(f"[Skipped] {pair_address} is {age_minutes:.0f} min old — older than MAX_AGE_MINUTES ({MAX_AGE_MINUTES}).")
+                continue
 
         name = pair.get("baseToken", {}).get("name", "Unknown")
         price = pair.get("priceUsd", "N/A")
@@ -99,6 +113,12 @@ def main():
     print(f"Watching for ticker '${TARGET_TICKER}' on chain '{TARGET_CHAIN}'")
     seen = load_seen()
     print(f"Loaded {len(seen)} previously seen pairs from disk.")
+
+    if not seen:
+        print("No saved history found — running a silent baseline sync first (no alerts for existing pairs)...")
+        check_dexscreener(seen, baseline_mode=True)
+        save_seen(seen)
+        print(f"Baseline complete. {len(seen)} existing pairs recorded. Now watching for NEW ones only.")
 
     while True:
         check_dexscreener(seen)
