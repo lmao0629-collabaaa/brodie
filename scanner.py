@@ -238,7 +238,7 @@ def process_pair(pair, tracked, baseline_mode=False):
     url = pair.get("url", "")
     age_minutes = pair_age_minutes(pair, now_ms)
 
-    # ---- New pair detected (logged only — no longer sent to Telegram) ----
+    # ---- New pair detected (logged only — no longer sent to Telegram, EXCEPT for $brodie specifically) ----
     if not entry["new_alerted"]:
         if baseline_mode:
             entry["new_alerted"] = True
@@ -247,6 +247,16 @@ def process_pair(pair, tracked, baseline_mode=False):
             is_fresh = age_minutes is None or age_minutes <= MAX_AGE_MINUTES
             if is_fresh:
                 print(f"[New pair] ${symbol} ({name}) — {url}")
+                if symbol.lower() == "brodie":
+                    msg = (
+                        "New $BRODIE pair detected\n\n"
+                        f"Name: {name}\n"
+                        f"Price: ${price}\n"
+                        f"Liquidity: ${liquidity}\n"
+                        f"Link: {url}"
+                    )
+                    print(msg)
+                    send_telegram(msg)
             entry["new_alerted"] = True
             changed = True
 
